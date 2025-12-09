@@ -1,0 +1,5 @@
+{
+  "name": "Copy of SmartWealth HK",
+  "description": "A personal finance tracker for Hong Kong users. Manage assets (Cash, Stocks, Crypto) with AI-powered price updates and track options trading strategies (Short Put / Long Call).",
+  "requestFramePermissions": []
+}
