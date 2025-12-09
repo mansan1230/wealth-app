@@ -1,4 +1,3 @@
-
 import React, { useMemo, useState } from 'react';
 import { OptionTrade, OptionType, PnLEntry } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
@@ -27,14 +26,10 @@ const MonthlyPnL: React.FC<MonthlyPnLProps> = ({ trades, manualEntries, setManua
     
     trades.forEach(trade => {
       // Event 1: Open Trade
-      // Short Put: Receive Premium (Income +)
-      // Long Call: Pay Premium (Cost -) (Wait, usually premium is cost basis. Let's treat it as Cashflow)
-      // NOTE: For P&L, usually we track "Realized".
-      // Cash Flow approach:
-      // Short Put Open: +Premium
-      // Long Call Open: -Premium (Cost)
+      // Short Put & Covered Call (Short Call): Receive Premium (Income +)
+      // Both are credit strategies in this context.
       
-      const openAmount = trade.type === OptionType.SHORT_PUT ? trade.premium : -trade.premium;
+      const openAmount = trade.premium;
       entries.push({
         id: `opt-open-${trade.id}`,
         date: trade.openDate,
@@ -46,9 +41,9 @@ const MonthlyPnL: React.FC<MonthlyPnLProps> = ({ trades, manualEntries, setManua
 
       // Event 2: Close Trade (if closed)
       if (trade.status === 'CLOSED' && trade.closePrice !== undefined && trade.expiryDate) {
-        // Short Put Close: Buy back (-Cost)
-        // Long Call Close: Sell (+Income)
-        const closeAmount = trade.type === OptionType.SHORT_PUT ? -trade.closePrice : trade.closePrice;
+        // Short Put & Covered Call Close: Buy back (-Cost)
+        // Closing a short position is always a debit (negative cash flow relative to the specific transaction action of closing)
+        const closeAmount = -trade.closePrice;
          entries.push({
           id: `opt-close-${trade.id}`,
           date: trade.expiryDate, // Using expiry date as close date proxy if not available
