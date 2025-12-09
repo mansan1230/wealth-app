@@ -5,27 +5,28 @@ import { Asset, AssetType } from "../types";
 const getApiKey = (): string => {
   let key = '';
   
+  // 1. Try Vite (import.meta.env)
   try {
-    // Check if import.meta.env exists (Vite standard)
+    // Check if import.meta exists and has env property before accessing
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env) {
       // @ts-ignore
       key = import.meta.env.VITE_API_KEY || '';
     }
   } catch (e) {
-    // Ignore errors accessing import.meta
+    console.warn("Error reading import.meta.env", e);
   }
 
-  // Fallback: Check process.env (Node.js or some web containers)
+  // 2. Fallback: Try process.env (Node.js/CI)
   if (!key) {
     try {
       // @ts-ignore
       if (typeof process !== 'undefined' && process.env) {
         // @ts-ignore
-        key = process.env.API_KEY || process.env.VITE_API_KEY || '';
+        key = process.env.VITE_API_KEY || process.env.API_KEY || '';
       }
     } catch (e) {
-      // Ignore errors accessing process
+      // Ignore process errors
     }
   }
 
@@ -34,8 +35,13 @@ const getApiKey = (): string => {
 
 const apiKey = getApiKey();
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey });
+// Initialize Gemini safely
+let ai: GoogleGenAI;
+try {
+    ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
+} catch (error) {
+    console.error("Failed to initialize Gemini AI", error);
+}
 
 // Mapping for common cryptocurrencies to CoinGecko IDs
 const COINGECKO_MAP: Record<string, string> = {
@@ -104,8 +110,8 @@ export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string,
   // 3. Fetch Stock Prices (Gemini Search Grounding)
   if (stockTickers.length > 0) {
     try {
-      if (!apiKey) {
-        console.warn("No API Key found. Skipping stock price fetch.");
+      if (!apiKey || apiKey === 'dummy-key') {
+        console.warn("No valid API Key found. Skipping stock price fetch.");
         return prices;
       }
 
