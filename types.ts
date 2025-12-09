@@ -18,7 +18,7 @@ export interface Asset {
 
 export enum OptionType {
   SHORT_PUT = 'SHORT_PUT',
-  LONG_CALL = 'LONG_CALL'
+  COVERED_CALL = 'COVERED_CALL'
 }
 
 export interface OptionTrade {
