@@ -39,15 +39,9 @@ const OptionsJournal: React.FC<OptionsJournalProps> = ({ trades, setTrades }) =>
   const calculateROI = (trade: OptionTrade | Partial<OptionTrade>) => {
     if (!trade.premium || !trade.collateralOrCost) return 0;
     
-    if (trade.type === OptionType.SHORT_PUT) {
-        return (trade.premium / trade.collateralOrCost) * 100;
-    } else {
-        if (trade.status === 'CLOSED' && trade.closePrice !== undefined) {
-             const profit = trade.closePrice - trade.premium; 
-             return (profit / trade.premium) * 100;
-        }
-        return 0;
-    }
+    // Both strategies are income strategies (Selling options)
+    // ROI = Premium Received / Collateral (or Share Value)
+    return (trade.premium / trade.collateralOrCost) * 100;
   };
 
   const handleUpdatePrices = async () => {
@@ -161,10 +155,13 @@ const OptionsJournal: React.FC<OptionsJournalProps> = ({ trades, setTrades }) =>
           label = isSafe ? '價外 (OTM)' : '價內 (ITM)';
           colorClass = isSafe ? 'text-green-400' : 'text-red-400';
       } else {
-          // Long Call: Profit if Market > Strike (ITM)
-          isSafe = currentPrice > trade.strikePrice; // "Safe" here means profitable for Long Call
-          label = isSafe ? '價內 (ITM)' : '價外 (OTM)';
-          colorClass = isSafe ? 'text-green-400' : 'text-red-400';
+          // Covered Call (Short Call): 
+          // OTM if Market < Strike (Safe/Keep Shares)
+          // ITM if Market > Strike (Assigned/Capped Gain)
+          isSafe = currentPrice < trade.strikePrice; 
+          label = isSafe ? '價外 (OTM)' : '價內 (ITM)';
+          // For Covered Call, ITM isn't necessarily "bad" (max profit), but strictly speaking OTM means the option expires worthless (income retained without selling shares).
+          colorClass = isSafe ? 'text-green-400' : 'text-orange-400';
       }
 
       return (
@@ -188,7 +185,7 @@ const OptionsJournal: React.FC<OptionsJournalProps> = ({ trades, setTrades }) =>
                 <div>
                     <h2 className="text-xl font-bold text-white mb-2">期權收益表 (Options Income)</h2>
                     <p className="text-gray-400 text-sm">
-                        追踪你的 Short Put 及 Long Call 策略回報。
+                        追踪你的 Short Put 及 Covered Call 策略回報。
                     </p>
                 </div>
                 <button 
@@ -205,7 +202,7 @@ const OptionsJournal: React.FC<OptionsJournalProps> = ({ trades, setTrades }) =>
                   <div className="bg-slate-950/50 p-4 rounded-xl border border-blue-900/30">
                       <div className="text-xs text-blue-400 uppercase font-semibold">總權利金收入 (Premium)</div>
                       <div className="text-2xl font-mono font-bold text-white mt-1">
-                          ${trades.reduce((sum, t) => t.type === OptionType.SHORT_PUT ? sum + t.premium : sum, 0).toLocaleString()}
+                          ${trades.reduce((sum, t) => sum + t.premium, 0).toLocaleString()}
                       </div>
                   </div>
                   <div className="bg-slate-950/50 p-4 rounded-xl border border-purple-900/30">
@@ -252,10 +249,10 @@ const OptionsJournal: React.FC<OptionsJournalProps> = ({ trades, setTrades }) =>
                                 <span className="font-bold">Short Put</span>
                                 <div className="text-xs opacity-70 mt-1">收租 (Bullish/Neutral)</div>
                             </label>
-                            <label className={`flex-1 cursor-pointer border rounded-xl p-3 text-center transition ${formData.type === OptionType.LONG_CALL ? 'bg-green-600/20 border-green-500 text-green-400' : 'border-slate-700 text-gray-500 hover:border-slate-500'}`}>
-                                <input type="radio" name="type" value={OptionType.LONG_CALL} checked={formData.type === OptionType.LONG_CALL} onChange={handleInputChange} className="hidden"/>
-                                <span className="font-bold">Long Call</span>
-                                <div className="text-xs opacity-70 mt-1">看升 (Bullish)</div>
+                            <label className={`flex-1 cursor-pointer border rounded-xl p-3 text-center transition ${formData.type === OptionType.COVERED_CALL ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'border-slate-700 text-gray-500 hover:border-slate-500'}`}>
+                                <input type="radio" name="type" value={OptionType.COVERED_CALL} checked={formData.type === OptionType.COVERED_CALL} onChange={handleInputChange} className="hidden"/>
+                                <span className="font-bold">Covered Call (備兌)</span>
+                                <div className="text-xs opacity-70 mt-1">收租/出貨 (Income/Exit)</div>
                             </label>
                         </div>
                     </div>
@@ -281,11 +278,11 @@ const OptionsJournal: React.FC<OptionsJournalProps> = ({ trades, setTrades }) =>
 
                     <div>
                          <label className="block text-xs uppercase text-gray-500 mb-1">權利金 (Premium Total)</label>
-                         <input type="number" name="premium" value={formData.premium || ''} onChange={handleInputChange} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:border-blue-500 outline-none" placeholder="$ Received/Paid" />
+                         <input type="number" name="premium" value={formData.premium || ''} onChange={handleInputChange} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:border-blue-500 outline-none" placeholder="$ Received" />
                     </div>
                     <div>
                          <label className="block text-xs uppercase text-gray-500 mb-1">
-                             {formData.type === OptionType.SHORT_PUT ? '保證金 (Collateral)' : '總成本 (Cost)'}
+                             {formData.type === OptionType.SHORT_PUT ? '保證金 (Collateral)' : '正股成本 (Stock Cost)'}
                          </label>
                          <input type="number" name="collateralOrCost" value={formData.collateralOrCost || ''} onChange={handleInputChange} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white focus:border-blue-500 outline-none" placeholder="$ Amount" />
                     </div>
@@ -321,8 +318,8 @@ const OptionsJournal: React.FC<OptionsJournalProps> = ({ trades, setTrades }) =>
                     {trades.map((trade) => (
                         <tr key={trade.id} className="hover:bg-slate-800/50 transition">
                             <td className="px-6 py-4">
-                                <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${trade.type === OptionType.SHORT_PUT ? 'bg-blue-900/50 text-blue-400 border border-blue-900' : 'bg-green-900/50 text-green-400 border border-green-900'}`}>
-                                    {trade.type === OptionType.SHORT_PUT ? 'Short Put' : 'Long Call'}
+                                <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${trade.type === OptionType.SHORT_PUT ? 'bg-blue-900/50 text-blue-400 border border-blue-900' : 'bg-indigo-900/50 text-indigo-400 border border-indigo-900'}`}>
+                                    {trade.type === OptionType.SHORT_PUT ? 'Short Put' : 'Covered Call'}
                                 </span>
                             </td>
                             <td className="px-6 py-4">
