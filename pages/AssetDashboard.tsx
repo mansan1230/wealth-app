@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Asset, AssetType } from '../types';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
@@ -7,11 +8,12 @@ import { Plus, Trash2, RefreshCw, Wallet, Bitcoin, TrendingUp, Pencil, X } from 
 interface AssetDashboardProps {
   assets: Asset[];
   setAssets: React.Dispatch<React.SetStateAction<Asset[]>>;
+  isPrivacyMode: boolean;
 }
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
-const AssetDashboard: React.FC<AssetDashboardProps> = ({ assets, setAssets }) => {
+const AssetDashboard: React.FC<AssetDashboardProps> = ({ assets, setAssets, isPrivacyMode }) => {
   const [loading, setLoading] = useState(false);
   
   // Form State
@@ -150,7 +152,11 @@ const AssetDashboard: React.FC<AssetDashboardProps> = ({ assets, setAssets }) =>
           </div>
           <h2 className="text-gray-400 text-sm font-medium mb-1">總資產價值 (Total Net Worth)</h2>
           <div className="text-4xl font-bold text-white tracking-tight">
-            ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-lg text-gray-500 font-normal">USD</span>
+            {isPrivacyMode 
+                ? '****' 
+                : `$${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            } 
+            <span className="text-lg text-gray-500 font-normal ml-2">USD</span>
           </div>
           <div className="mt-6 flex items-center space-x-3">
             <button 
@@ -159,7 +165,7 @@ const AssetDashboard: React.FC<AssetDashboardProps> = ({ assets, setAssets }) =>
               className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              <span>{loading ? '更新中...' : '更新市價 (AI)'}</span>
+              <span>{loading ? '更新中...' : '更新市價'}</span>
             </button>
             <button 
               onClick={() => {
@@ -201,7 +207,7 @@ const AssetDashboard: React.FC<AssetDashboardProps> = ({ assets, setAssets }) =>
                    <RechartsTooltip 
                       contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#fff' }}
                       itemStyle={{ color: '#fff' }}
-                      formatter={(value: number) => `$${value.toLocaleString()}`}
+                      formatter={(value: number) => isPrivacyMode ? '****' : `$${value.toLocaleString()}`}
                    />
                    <Legend verticalAlign="middle" align="right" layout="vertical" iconType="circle" />
                  </PieChart>
@@ -293,14 +299,14 @@ const AssetDashboard: React.FC<AssetDashboardProps> = ({ assets, setAssets }) =>
                                 <span className="font-bold text-white">{asset.ticker}</span>
                             </td>
                             <td className="px-6 py-4 text-right text-gray-300">
-                                {asset.quantity.toLocaleString()}
+                                {isPrivacyMode ? '****' : asset.quantity.toLocaleString()}
                             </td>
                             <td className="px-6 py-4 text-right text-gray-300">
-                                ${asset.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                {asset.lastUpdated && <div className="text-xs text-gray-600">Updated: {asset.lastUpdated}</div>}
+                                {isPrivacyMode ? '****' : `$${asset.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+                                {asset.lastUpdated && !isPrivacyMode && <div className="text-xs text-gray-600">Updated: {asset.lastUpdated}</div>}
                             </td>
                             <td className="px-6 py-4 text-right text-green-400 font-semibold">
-                                ${(asset.quantity * asset.currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                {isPrivacyMode ? '****' : `$${(asset.quantity * asset.currentPrice).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
                             </td>
                             <td className="px-6 py-4 text-center">
                                 <div className="flex items-center justify-center space-x-2">
