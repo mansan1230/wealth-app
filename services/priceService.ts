@@ -20,9 +20,9 @@ const COINGECKO_MAP: Record<string, string> = {
 };
 
 /**
- * Fetches market prices using actual market data APIs:
+ * Fetches market prices using public market data APIs:
  * 1. CoinGecko API for Cryptocurrencies
- * 2. Yahoo Finance API for Stocks (via CORS proxy)
+ * 2. Yahoo Finance v8 API for Stocks (via CORS proxy)
  */
 export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string, number>> => {
   const prices: Record<string, number> = {};
@@ -41,7 +41,7 @@ export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string,
     }
   });
 
-  // 2. Fetch Crypto Prices (CoinGecko)
+  // 2. Fetch Crypto Prices (CoinGecko) - Reliable public API
   if (cryptoIds.length > 0) {
     try {
       const response = await fetch(
@@ -65,43 +65,48 @@ export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string,
     }
   }
 
-  // 3. Fetch Stock Prices (Yahoo Finance via Proxy)
+  // 3. Fetch Stock Prices (Yahoo Finance v8 Chart Endpoint)
+  // v7 quote endpoint often returns "Unauthorized", v8 chart is more resilient for public access.
   if (stockTickers.length > 0) {
-    try {
-      // Use allorigins proxy to bypass CORS for Yahoo Finance
-      const symbols = stockTickers.join(',');
-      const yahooUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
+    // Process stocks in parallel but individually to use the more stable chart endpoint
+    const stockPromises = stockTickers.map(async (ticker) => {
+      try {
+        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1m&range=1d`;
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
 
-      const response = await fetch(proxyUrl);
-      if (response.ok) {
-        const wrapper = await response.json();
-        // allorigins wraps the response in a 'contents' field as a string
-        const data = JSON.parse(wrapper.contents);
-        
-        if (data.quoteResponse && data.quoteResponse.result) {
-          data.quoteResponse.result.forEach((quote: any) => {
-            const ticker = quote.symbol;
-            const price = quote.regularMarketPrice;
+        const response = await fetch(proxyUrl);
+        if (response.ok) {
+          const wrapper = await response.json();
+          const data = JSON.parse(wrapper.contents);
+          
+          if (data.chart && data.chart.result && data.chart.result[0]) {
+            const result = data.chart.result[0];
+            const meta = result.meta;
+            const price = meta.regularMarketPrice;
             
-            // Find matching assets to ensure correct keying
-            const matchedAsset = assets.find(a => 
-                (a.ticker?.toUpperCase() === ticker.toUpperCase()) || 
-                (a.name.toUpperCase() === ticker.toUpperCase())
-            );
-            
-            if (matchedAsset) {
-                const key = matchedAsset.ticker || matchedAsset.name;
-                prices[key] = Number(price);
-            } else {
-                prices[ticker] = Number(price);
+            if (price !== undefined) {
+              return { ticker, price: Number(price) };
             }
-          });
+          }
         }
+      } catch (error) {
+        console.warn(`Failed to fetch price for ${ticker}:`, error);
       }
-    } catch (error) {
-      console.error("Yahoo Finance Price Fetch Error:", error);
-    }
+      return null;
+    });
+
+    const results = await Promise.all(stockPromises);
+    results.forEach(res => {
+      if (res) {
+        // Find matching assets to ensure correct keying based on user input
+        const matchedAsset = assets.find(a => 
+            (a.ticker?.toUpperCase() === res.ticker.toUpperCase()) || 
+            (a.name.toUpperCase() === res.ticker.toUpperCase())
+        );
+        const key = matchedAsset?.ticker || matchedAsset?.name || res.ticker;
+        prices[key] = res.price;
+      }
+    });
   }
 
   return prices;
@@ -109,17 +114,14 @@ export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string,
 
 /**
  * Fetch prices for a list of tickers (string array).
- * Useful for Options Journal where we might not have full Asset objects.
  */
 export const fetchPricesForTickers = async (tickers: string[]): Promise<Record<string, number>> => {
     if (tickers.length === 0) return {};
 
-    // Create temporary asset objects to reuse the main function logic
     const dummyAssets: Asset[] = tickers.map(t => ({
         id: t,
         name: t,
         ticker: t,
-        // Guess type: if in COINGECKO_MAP or typical crypto ticker, it's crypto
         type: COINGECKO_MAP[t.toUpperCase()] ? AssetType.CRYPTO : AssetType.STOCK,
         quantity: 0,
         currentPrice: 0,
