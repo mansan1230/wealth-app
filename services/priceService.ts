@@ -1,9 +1,43 @@
-
+import { GoogleGenAI } from "@google/genai";
 import { Asset, AssetType } from "../types";
 
-/**
- * Mapping for common cryptocurrencies to CoinGecko IDs
- */
+// Safely retrieve API Key handling various environments (Vite, Node, etc.)
+const getApiKey = (): string => {
+  let key = '';
+  
+  try {
+    // Check if import.meta.env exists (Vite standard)
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      // @ts-ignore
+      key = import.meta.env.VITE_API_KEY || '';
+    }
+  } catch (e) {
+    // Ignore errors accessing import.meta
+  }
+
+  // Fallback: Check process.env (Node.js or some web containers)
+  if (!key) {
+    try {
+      // @ts-ignore
+      if (typeof process !== 'undefined' && process.env) {
+        // @ts-ignore
+        key = process.env.API_KEY || process.env.VITE_API_KEY || '';
+      }
+    } catch (e) {
+      // Ignore errors accessing process
+    }
+  }
+
+  return key;
+};
+
+const apiKey = getApiKey();
+
+// Initialize Gemini
+const ai = new GoogleGenAI({ apiKey });
+
+// Mapping for common cryptocurrencies to CoinGecko IDs
 const COINGECKO_MAP: Record<string, string> = {
   'BTC': 'bitcoin',
   'ETH': 'ethereum',
@@ -20,9 +54,9 @@ const COINGECKO_MAP: Record<string, string> = {
 };
 
 /**
- * Fetches market prices using public market data APIs:
- * 1. CoinGecko API for Cryptocurrencies
- * 2. Yahoo Finance v8 API for Stocks (via CORS proxy)
+ * Fetches market prices using a hybrid approach:
+ * 1. CoinGecko API for Cryptocurrencies (Free, fast, no key required)
+ * 2. Gemini Search Grounding for Stocks (Uses your existing API Key)
  */
 export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string, number>> => {
   const prices: Record<string, number> = {};
@@ -34,6 +68,7 @@ export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string,
     const ticker = asset.ticker?.toUpperCase() || asset.name.toUpperCase();
     
     if (asset.type === AssetType.CRYPTO) {
+      // Try to find a mapped ID, otherwise use name as ID (hit or miss)
       const geckoId = COINGECKO_MAP[ticker] || asset.name.toLowerCase();
       cryptoIds.push(geckoId);
     } else if (asset.type === AssetType.STOCK) {
@@ -41,7 +76,7 @@ export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string,
     }
   });
 
-  // 2. Fetch Crypto Prices (CoinGecko) - Reliable public API
+  // 2. Fetch Crypto Prices (CoinGecko)
   if (cryptoIds.length > 0) {
     try {
       const response = await fetch(
@@ -55,6 +90,7 @@ export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string,
             const geckoId = COINGECKO_MAP[ticker] || asset.name.toLowerCase();
             
             if (data[geckoId] && data[geckoId].usd) {
+                // Key the result by the asset's ticker/name to match back in UI
                 const key = asset.ticker || asset.name;
                 prices[key] = data[geckoId].usd;
             }
@@ -65,48 +101,59 @@ export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string,
     }
   }
 
-  // 3. Fetch Stock Prices (Yahoo Finance v8 Chart Endpoint)
-  // v7 quote endpoint often returns "Unauthorized", v8 chart is more resilient for public access.
+  // 3. Fetch Stock Prices (Gemini Search Grounding)
   if (stockTickers.length > 0) {
-    // Process stocks in parallel but individually to use the more stable chart endpoint
-    const stockPromises = stockTickers.map(async (ticker) => {
-      try {
-        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1m&range=1d`;
-        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`;
+    try {
+      if (!apiKey) {
+        console.warn("No API Key found. Skipping stock price fetch.");
+        return prices;
+      }
 
-        const response = await fetch(proxyUrl);
-        if (response.ok) {
-          const wrapper = await response.json();
-          const data = JSON.parse(wrapper.contents);
-          
-          if (data.chart && data.chart.result && data.chart.result[0]) {
-            const result = data.chart.result[0];
-            const meta = result.meta;
-            const price = meta.regularMarketPrice;
-            
-            if (price !== undefined) {
-              return { ticker, price: Number(price) };
-            }
-          }
+      // We ask Gemini to search for prices and format as JSON
+      const prompt = `
+        Find the latest real-time market price in USD for these stock tickers: ${stockTickers.join(', ')}.
+        Return ONLY a JSON object where the key is the ticker symbol (e.g. AAPL) and the value is the numeric price.
+        Example: { "AAPL": 150.25, "TSLA": 200.50 }
+        Do not include markdown blocks or any other text.
+      `;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} }], // Enable live search
         }
-      } catch (error) {
-        console.warn(`Failed to fetch price for ${ticker}:`, error);
-      }
-      return null;
-    });
+      });
 
-    const results = await Promise.all(stockPromises);
-    results.forEach(res => {
-      if (res) {
-        // Find matching assets to ensure correct keying based on user input
-        const matchedAsset = assets.find(a => 
-            (a.ticker?.toUpperCase() === res.ticker.toUpperCase()) || 
-            (a.name.toUpperCase() === res.ticker.toUpperCase())
-        );
-        const key = matchedAsset?.ticker || matchedAsset?.name || res.ticker;
-        prices[key] = res.price;
+      const text = response.text || '';
+      // Remove potential markdown code blocks
+      const cleanJson = text.replace(/```json|```/g, '').trim();
+      
+      try {
+        const stockData = JSON.parse(cleanJson);
+        Object.entries(stockData).forEach(([ticker, price]) => {
+             // Find matching assets to ensure correct keying
+             // We match loosely to handle case sensitivity
+             const matchedAsset = assets.find(a => 
+                 (a.ticker?.toUpperCase() === ticker.toUpperCase()) || 
+                 (a.name.toUpperCase() === ticker.toUpperCase())
+             );
+             
+             if (matchedAsset) {
+                 const key = matchedAsset.ticker || matchedAsset.name;
+                 prices[key] = Number(price);
+             } else {
+                 // Fallback if strict match fails, just use the ticker returned
+                 prices[ticker] = Number(price);
+             }
+        });
+      } catch (e) {
+        console.error("Failed to parse stock price JSON:", text);
       }
-    });
+
+    } catch (error) {
+      console.error("Gemini Price Fetch Error:", error);
+    }
   }
 
   return prices;
@@ -114,14 +161,17 @@ export const fetchMarketPrices = async (assets: Asset[]): Promise<Record<string,
 
 /**
  * Fetch prices for a list of tickers (string array).
+ * Useful for Options Journal where we might not have full Asset objects.
  */
 export const fetchPricesForTickers = async (tickers: string[]): Promise<Record<string, number>> => {
     if (tickers.length === 0) return {};
 
+    // Create temporary asset objects to reuse the main function logic
     const dummyAssets: Asset[] = tickers.map(t => ({
         id: t,
         name: t,
         ticker: t,
+        // Guess type: if in COINGECKO_MAP, it's crypto, else assume stock
         type: COINGECKO_MAP[t.toUpperCase()] ? AssetType.CRYPTO : AssetType.STOCK,
         quantity: 0,
         currentPrice: 0,
